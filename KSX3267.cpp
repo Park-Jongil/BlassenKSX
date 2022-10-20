@@ -10,7 +10,8 @@
 extern unsigned char       szRecvBuf[2][1024];
 extern short int           iRecvCount[2];
 extern unsigned char       iDeviceID;
-
+extern short int           iLastOPID;
+extern DeviceInfo          stDeviceInfo[MAX_DEVICE_COUNT];
 //-------------------------------------------------------------------------------
 // KSX3267 MemoryStack
 //---------------------------------------------------------------------------
@@ -114,7 +115,7 @@ void Protocol_MultiWrite_DataBlock(RequestWriteBlock *pChkPnt)
   char            szMessage[1024];
   unsigned char   Temp;
   unsigned char   szBuffer[1024],szTemp[1024];
-  unsigned short int  iChkCRC,iAddr,iData,iCount,iMapID;
+  unsigned short int  iChkCRC,iAddr,iData,iCount,iMapID,iMapPos;
   DeviceInfo      *pFindPnt;
   ControlCmd      *pChkCtrl,*pCmdOP;
 //  ControlCmd      CheckCmd;
@@ -123,8 +124,22 @@ void Protocol_MultiWrite_DataBlock(RequestWriteBlock *pChkPnt)
     Protocol_Request_ErrorCode(pChkPnt->SlaveAddr,0x10,0x03);
     return;
   }
+// 전송되어진 레지스터값을 메모리에 적재하는것이 우선
   iAddr  = Convert_Endian(pChkPnt->Addr);
   iCount = Convert_Endian(pChkPnt->Count);
+  for(int i=0;i<iCount;i++) {
+    iData = Convert_Endian(pChkPnt->Data[i]);
+    KSX3267_Memory[iAddr+i] = iData;
+//    sprintf(szMessage,"    << KSX3267  Addr=%d , Data=%d",iAddr+i,iData);
+//    Serial.println(szMessage);
+  }
+  if (iAddr < 100) {
+    memcpy((char*)&stDeviceHead,(char*)&KSX3267_Memory[1],sizeof(stDeviceHead));
+  }
+
+// 실제 레지스터에 적용된 다음에 해당 블럭이 데이터블럭인지를 확인해야 한다. (2022.10.20)
+// 혹시나 시작주소가 503 이 아닌 501 로 들어온다면 아래의 코드는 정상적으로 동작하지 않는다. 
+/*
   pChkCtrl = (ControlCmd*)&KSX3267_Memory[iAddr]; 
   pCmdOP = (ControlCmd*)&pChkPnt->Data;
 //  기존의 OPID 값과 신규명령의 OPID 값이 달라야한다. 
@@ -133,26 +148,29 @@ void Protocol_MultiWrite_DataBlock(RequestWriteBlock *pChkPnt)
     Protocol_Request_ErrorCode(pChkPnt->SlaveAddr,0x10,0x03);
     return;
   }
+*/
   
-  for(int i=0;i<iCount;i++) {
-    iData = Convert_Endian(pChkPnt->Data[i]);
-    KSX3267_Memory[iAddr+i] = iData;
-  }
-  if (iAddr < 100) {
-    memcpy((char*)&stDeviceHead,(char*)&KSX3267_Memory[1],sizeof(stDeviceHead));
-  }
 // Controller 에 제어의 명령이 발생했는지를 확인할 필요가 있다
+// 전체장비에 대해서 장비의 제어명령이 속하는 주소의 값이 전달된 데이터블럭에 있는지를 확인해야 한다.(2022.10.20)
+// MapID=101 --> 제어명령블럭 503
+// MapID=102 --> 제어명령블럭 507
   if (500 <= iAddr && iAddr < 600) {
-    iMapID = (iAddr - 499) / 4;
+    for(int i=0;i<MAX_DEVICE_COUNT;i++) {
+      if (stDeviceInfo[i].iEnabled==true) { // && stDeviceInfo[i].iMemoryMapID==iMapID) {
+        iMapPos = 499 + (stDeviceInfo[i].iMemoryMapID-100)*4;          
+        if (iAddr <= iMapPos && iMapPos <= (iAddr+iCount)) {     // 해당전송된 블럭이 해당제어명령을 포함한다면
+          pChkCtrl = (ControlCmd*)&KSX3267_Memory[iMapPos]; 
+          sprintf(szMessage,"    << KSX3267  CmdOP=%d , OPID=%d , SetTime=%d",pChkCtrl->CmdOP,pChkCtrl->OPID,pChkCtrl->SetTime);
+          Serial.println(szMessage);
 // 해당하는 iMapID 의 장비에게 센서데이터의 값을 이용하여 On/Off 와 SystemMode , 설정온도를 전송한다.
-    pFindPnt = DeviceInfo_Search_byMapID(100+iMapID);
-    if (pFindPnt != NULL) {
-      pChkCtrl = (ControlCmd*)&KSX3267_Memory[iAddr]; 
-      sprintf(szMessage,"    << KSX3267  CmdOP=%d , OPID=%d , SetTime=%d",pChkCtrl->CmdOP,pChkCtrl->OPID,pChkCtrl->SetTime);
-      Serial.println(szMessage);
-      Protocol_Parser_SetSystemMode(pFindPnt->iDeviceID,pChkCtrl->CmdOP,pChkCtrl->SetTime/1000,(pChkCtrl->SetTime%100));
-      pControlStatus[iMapID].OPID = pChkCtrl->OPID;
-    }      
+          if (iLastOPID != pChkCtrl->OPID) {
+            Protocol_Parser_SetSystemMode(stDeviceInfo[i].iDeviceID,pChkCtrl->CmdOP,pChkCtrl->SetTime/1000,(pChkCtrl->SetTime%100));
+            pControlStatus[iMapID].OPID = pChkCtrl->OPID;
+          }
+          iLastOPID = pChkCtrl->OPID;
+        }
+      }
+    }
   }
   
 // Reponse Data

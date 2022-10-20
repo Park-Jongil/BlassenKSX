@@ -75,12 +75,12 @@ void SlaveDevice_GetStatusbyTime()
 
 //---------------------------------------------------------------------------
 // Set SystemMode Response( Code:0x14 , DataLen : 3 ) : 
-// [ PowerMode , SystemMode , SetTemp ]
+// [ iCmdOP , SystemMode , SetTemp ]
 //---------------------------------------------------------------------------
-void Protocol_Parser_SetSystemMode(int iDeviceID,int iPowerMode,int iSystemMode,int iSetTemp)
+void Protocol_Parser_SetSystemMode(int iDeviceID,int iCmdOP,int iSystemMode,int iSetTemp)
 {
   RequestProtocol     stSendMsg;
-  unsigned short int  iChkCRC;
+  unsigned short int  iChkCRC,iPowerMode;
   DeviceInfo          *pFindPnt;
 
   pFindPnt = DeviceInfo_Search_byID(iDeviceID);
@@ -89,6 +89,14 @@ void Protocol_Parser_SetSystemMode(int iDeviceID,int iPowerMode,int iSystemMode,
     stSendMsg.SID = iDeviceID;
     stSendMsg.CMD = 0x34;
     stSendMsg.LEN = 0x03;
+    if (iCmdOP == 0) {   // 0 : OFF
+      iPowerMode = 0;  
+    } else if (iCmdOP == 201) {   // 201 : ON
+      iPowerMode = 1;  
+    } else if (iCmdOP == 202 || iCmdOP == 203) {   // 202 : TIMED_ON , 203 : DIRECTIONAL_ON
+      iPowerMode = 1;  
+    }
+    
     if (iSystemMode==0x00 && iSetTemp==0x00) {
       stSendMsg.DATA[0] = iPowerMode != 0 ? 1 : 0;       // Power Mode 라서 On이면 무조건 SystemMode 로 설정해야 함.
       stSendMsg.DATA[1] = 0x00;

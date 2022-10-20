@@ -45,6 +45,7 @@ unsigned char       szRecvBuf[2][1024];
 short int           iRecvCount[2] = { 0 , 0 };
 unsigned char       iDeviceID = 0x01;
 short int           iSerial_Menu = 0;
+short int           iLastOPID = -1;
 //-------------------------------------------------------------------------------
 // EEPROM
 //-------------------------------------------------------------------------------
